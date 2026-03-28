@@ -430,6 +430,110 @@ async def _apply_ltm_after_exchange(
         await _remember_semantic(state, agent, ollama_base, user_line, assistant_line)
 
 
+# Request body models must live at module scope. Classes nested inside create_app() are not treated
+# as JSON bodies by FastAPI (422: field required in query).
+
+
+class NewAgentIn(BaseModel):
+    name: str
+    description: Optional[str] = None
+    system_prompt: Optional[str] = Field(None, alias="systemPrompt")
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    memory_short_term_limit: Optional[int] = Field(None, alias="memoryShortTermLimit")
+    memory_long_term_enabled: Optional[bool] = Field(None, alias="memoryLongTermEnabled")
+    embedding_model: Optional[str] = Field(None, alias="embeddingModel")
+    voice_provider: Optional[str] = Field(None, alias="voiceProvider")
+    voice_model: Optional[str] = Field(None, alias="voiceModel")
+    stt_provider: Optional[str] = Field(None, alias="sttProvider")
+    voice_settings_json: Optional[str] = Field(None, alias="voiceSettingsJson")
+    foundry_user_id: Optional[str] = Field(None, alias="foundryUserId")
+    foundry_actor_id: Optional[str] = Field(None, alias="foundryActorId")
+    foundry_world_id: Optional[str] = Field(None, alias="foundryWorldId")
+    role: Optional[str] = None
+    knowledge_scope: Optional[str] = Field(None, alias="knowledgeScope")
+    is_enabled: Optional[bool] = Field(None, alias="isEnabled")
+    memory_stm_guidance: Optional[str] = Field(None, alias="memoryStmGuidance")
+    memory_ltm_guidance: Optional[str] = Field(None, alias="memoryLtmGuidance")
+    memory_stm_filter: Optional[str] = Field(None, alias="memoryStmFilter")
+    memory_ltm_filter: Optional[str] = Field(None, alias="memoryLtmFilter")
+    memory_ltm_agent_curated: Optional[bool] = Field(None, alias="memoryLtmAgentCurated")
+    world_wiki_url: Optional[str] = Field(None, alias="worldWikiUrl")
+    world_wiki_notes: Optional[str] = Field(None, alias="worldWikiNotes")
+    foundry_sheet_snapshot: Optional[str] = Field(None, alias="foundrySheetSnapshot")
+
+    model_config = {"populate_by_name": True}
+
+
+class UpdateAgentIn(BaseModel):
+    id: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    system_prompt: Optional[str] = Field(None, alias="systemPrompt")
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    memory_short_term_limit: Optional[int] = Field(None, alias="memoryShortTermLimit")
+    memory_long_term_enabled: Optional[bool] = Field(None, alias="memoryLongTermEnabled")
+    embedding_model: Optional[str] = Field(None, alias="embeddingModel")
+    voice_provider: Optional[str] = Field(None, alias="voiceProvider")
+    voice_model: Optional[str] = Field(None, alias="voiceModel")
+    stt_provider: Optional[str] = Field(None, alias="sttProvider")
+    voice_settings_json: Optional[str] = Field(None, alias="voiceSettingsJson")
+    foundry_user_id: Optional[str] = Field(None, alias="foundryUserId")
+    foundry_actor_id: Optional[str] = Field(None, alias="foundryActorId")
+    foundry_world_id: Optional[str] = Field(None, alias="foundryWorldId")
+    role: Optional[str] = None
+    knowledge_scope: Optional[str] = Field(None, alias="knowledgeScope")
+    is_enabled: Optional[bool] = Field(None, alias="isEnabled")
+    memory_stm_guidance: Optional[str] = Field(None, alias="memoryStmGuidance")
+    memory_ltm_guidance: Optional[str] = Field(None, alias="memoryLtmGuidance")
+    memory_stm_filter: Optional[str] = Field(None, alias="memoryStmFilter")
+    memory_ltm_filter: Optional[str] = Field(None, alias="memoryLtmFilter")
+    memory_ltm_agent_curated: Optional[bool] = Field(None, alias="memoryLtmAgentCurated")
+    world_wiki_url: Optional[str] = Field(None, alias="worldWikiUrl")
+    world_wiki_notes: Optional[str] = Field(None, alias="worldWikiNotes")
+    foundry_sheet_snapshot: Optional[str] = Field(None, alias="foundrySheetSnapshot")
+
+    model_config = {"populate_by_name": True}
+
+
+class ConfigKV(BaseModel):
+    key: str
+    value: str
+
+
+class ChatIn(BaseModel):
+    agent_id: str = Field(alias="agentId")
+    user_message: str = Field("", alias="userMessage")
+    party_followup: bool = Field(False, alias="partyFollowup")
+    model_config = {"populate_by_name": True}
+
+
+class BanterIn(BaseModel):
+    max_turns: int = Field(4, ge=2, le=12, alias="maxTurns")
+    topic: str = ""
+    model_config = {"populate_by_name": True}
+
+
+class MemorySearchIn(BaseModel):
+    agent_id: str = Field(alias="agentId")
+    query: str
+    top_k: int = Field(8, alias="topK")
+    model_config = {"populate_by_name": True}
+
+
+class MemoryEmbedIn(BaseModel):
+    agent_id: str = Field(alias="agentId")
+    text: str
+    model_config = {"populate_by_name": True}
+
+
+class PiperSynthIn(BaseModel):
+    text: str
+    model_file: str = Field(alias="modelFile")
+    model_config = {"populate_by_name": True}
+
+
 def create_app(static_dir: Optional[Path] = None) -> FastAPI:
     conn = db.open_db(db_path())
     st = AppState(conn=conn, lock=threading.Lock())
@@ -443,105 +547,6 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         allow_headers=["*"],
     )
     app.state.fas = st
-
-    # ——— Pydantic bodies ———
-
-    class NewAgentIn(BaseModel):
-        name: str
-        description: Optional[str] = None
-        system_prompt: Optional[str] = Field(None, alias="systemPrompt")
-        model: Optional[str] = None
-        temperature: Optional[float] = None
-        memory_short_term_limit: Optional[int] = Field(None, alias="memoryShortTermLimit")
-        memory_long_term_enabled: Optional[bool] = Field(None, alias="memoryLongTermEnabled")
-        embedding_model: Optional[str] = Field(None, alias="embeddingModel")
-        voice_provider: Optional[str] = Field(None, alias="voiceProvider")
-        voice_model: Optional[str] = Field(None, alias="voiceModel")
-        stt_provider: Optional[str] = Field(None, alias="sttProvider")
-        voice_settings_json: Optional[str] = Field(None, alias="voiceSettingsJson")
-        foundry_user_id: Optional[str] = Field(None, alias="foundryUserId")
-        foundry_actor_id: Optional[str] = Field(None, alias="foundryActorId")
-        foundry_world_id: Optional[str] = Field(None, alias="foundryWorldId")
-        role: Optional[str] = None
-        knowledge_scope: Optional[str] = Field(None, alias="knowledgeScope")
-        is_enabled: Optional[bool] = Field(None, alias="isEnabled")
-        memory_stm_guidance: Optional[str] = Field(None, alias="memoryStmGuidance")
-        memory_ltm_guidance: Optional[str] = Field(None, alias="memoryLtmGuidance")
-        memory_stm_filter: Optional[str] = Field(None, alias="memoryStmFilter")
-        memory_ltm_filter: Optional[str] = Field(None, alias="memoryLtmFilter")
-        memory_ltm_agent_curated: Optional[bool] = Field(None, alias="memoryLtmAgentCurated")
-        world_wiki_url: Optional[str] = Field(None, alias="worldWikiUrl")
-        world_wiki_notes: Optional[str] = Field(None, alias="worldWikiNotes")
-        foundry_sheet_snapshot: Optional[str] = Field(None, alias="foundrySheetSnapshot")
-
-        model_config = {"populate_by_name": True}
-
-    class UpdateAgentIn(BaseModel):
-        id: str
-        name: Optional[str] = None
-        description: Optional[str] = None
-        system_prompt: Optional[str] = Field(None, alias="systemPrompt")
-        model: Optional[str] = None
-        temperature: Optional[float] = None
-        memory_short_term_limit: Optional[int] = Field(None, alias="memoryShortTermLimit")
-        memory_long_term_enabled: Optional[bool] = Field(None, alias="memoryLongTermEnabled")
-        embedding_model: Optional[str] = Field(None, alias="embeddingModel")
-        voice_provider: Optional[str] = Field(None, alias="voiceProvider")
-        voice_model: Optional[str] = Field(None, alias="voiceModel")
-        stt_provider: Optional[str] = Field(None, alias="sttProvider")
-        voice_settings_json: Optional[str] = Field(None, alias="voiceSettingsJson")
-        foundry_user_id: Optional[str] = Field(None, alias="foundryUserId")
-        foundry_actor_id: Optional[str] = Field(None, alias="foundryActorId")
-        foundry_world_id: Optional[str] = Field(None, alias="foundryWorldId")
-        role: Optional[str] = None
-        knowledge_scope: Optional[str] = Field(None, alias="knowledgeScope")
-        is_enabled: Optional[bool] = Field(None, alias="isEnabled")
-        memory_stm_guidance: Optional[str] = Field(None, alias="memoryStmGuidance")
-        memory_ltm_guidance: Optional[str] = Field(None, alias="memoryLtmGuidance")
-        memory_stm_filter: Optional[str] = Field(None, alias="memoryStmFilter")
-        memory_ltm_filter: Optional[str] = Field(None, alias="memoryLtmFilter")
-        memory_ltm_agent_curated: Optional[bool] = Field(None, alias="memoryLtmAgentCurated")
-        world_wiki_url: Optional[str] = Field(None, alias="worldWikiUrl")
-        world_wiki_notes: Optional[str] = Field(None, alias="worldWikiNotes")
-        foundry_sheet_snapshot: Optional[str] = Field(None, alias="foundrySheetSnapshot")
-
-        model_config = {"populate_by_name": True}
-
-    class ConfigKV(BaseModel):
-        key: str
-        value: str
-
-    class ChatIn(BaseModel):
-        agent_id: str = Field(alias="agentId")
-        user_message: str = Field("", alias="userMessage")
-        party_followup: bool = Field(False, alias="partyFollowup")
-        model_config = {"populate_by_name": True}
-
-    class BanterIn(BaseModel):
-        max_turns: int = Field(4, ge=2, le=12, alias="maxTurns")
-        topic: str = ""
-        model_config = {"populate_by_name": True}
-
-    class MemorySearchIn(BaseModel):
-        agent_id: str = Field(alias="agentId")
-        query: str
-        top_k: int = Field(8, alias="topK")
-        model_config = {"populate_by_name": True}
-
-    class MemoryEmbedIn(BaseModel):
-        agent_id: str = Field(alias="agentId")
-        text: str
-        model_config = {"populate_by_name": True}
-
-    class OllamaPullIn(BaseModel):
-        name: str
-
-        model_config = {"populate_by_name": True}
-
-    class PiperSynthIn(BaseModel):
-        text: str
-        model_file: str = Field(alias="modelFile")
-        model_config = {"populate_by_name": True}
 
     def _agent_json(a: Agent) -> dict[str, Any]:
         return db.agent_to_row(a)
@@ -557,20 +562,20 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         return await asyncio.to_thread(_)
 
     @app.post("/api/agents")
-    async def agents_create(body: NewAgentIn) -> dict[str, Any]:
+    async def agents_create(new_agent: NewAgentIn) -> dict[str, Any]:
         def _():
             with st.lock:
-                a = db.insert_agent(st.conn, body.model_dump(by_alias=True, exclude_none=True))
+                a = db.insert_agent(st.conn, new_agent.model_dump(by_alias=True, exclude_none=True))
                 return _agent_json(a)
 
         return await asyncio.to_thread(_)
 
     @app.patch("/api/agents")
-    async def agents_update(body: UpdateAgentIn) -> dict[str, Any]:
+    async def agents_update(patch: UpdateAgentIn) -> dict[str, Any]:
         def _():
             with st.lock:
                 try:
-                    a = db.update_agent(st.conn, body.model_dump(by_alias=True, exclude_unset=True))
+                    a = db.update_agent(st.conn, patch.model_dump(by_alias=True, exclude_unset=True))
                     return _agent_json(a)
                 except KeyError:
                     raise HTTPException(404, "agent not found")
@@ -621,10 +626,10 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         return await asyncio.to_thread(_)
 
     @app.post("/api/config")
-    async def config_set(body: ConfigKV) -> dict[str, bool]:
+    async def config_set(kv: ConfigKV) -> dict[str, bool]:
         def _():
             with st.lock:
-                db.set_config(st.conn, body.key, body.value)
+                db.set_config(st.conn, kv.key, kv.value)
 
         await asyncio.to_thread(_)
         return {"ok": True}
@@ -698,8 +703,10 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         return await health(base)
 
     @app.post("/api/ollama/pull")
-    async def ollama_pull_ep(body: OllamaPullIn) -> dict[str, Any]:
-        n = (body.name or "").strip()
+    async def ollama_pull_ep(data: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        # Nested Pydantic models inside create_app() are not treated as JSON body params (FastAPI
+        # expects them as query); use an explicit Body(dict) like party_broadcast_ep.
+        n = str(data.get("name") or "").strip()
         if not n:
             raise HTTPException(400, "name is required (e.g. llama3.2)")
         base = _get_ollama_base(st)
@@ -724,7 +731,7 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         return {"ok": True, "agentsUpdated": n}
 
     @app.post("/api/party/banter")
-    async def party_banter_ep(body: BanterIn = Body(...)) -> dict[str, Any]:
+    async def party_banter_ep(banter: BanterIn) -> dict[str, Any]:
         """Round-robin in-character lines between enabled PCs; disabled when combat snapshot is active."""
 
         def load_agents() -> tuple[list[Agent], bool]:
@@ -742,8 +749,8 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         if len(agents) < 2:
             raise HTTPException(400, "need at least two enabled player agents")
 
-        max_turns = body.max_turns
-        topic = (body.topic or "").strip()
+        max_turns = banter.max_turns
+        topic = (banter.topic or "").strip()
         peer_names = ", ".join(a.name for a in agents)
         ollama_base = _get_ollama_base(st)
         lines: list[dict[str, Any]] = []
@@ -771,12 +778,12 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         return {"ok": True, "turns": len(lines), "lines": lines}
 
     @app.post("/api/ollama/chat")
-    async def ollama_chat_ep(body: ChatIn) -> dict[str, str]:
+    async def ollama_chat_ep(chat: ChatIn) -> dict[str, str]:
         base = _get_ollama_base(st)
 
         def get_agent_sync():
             with st.lock:
-                return db.get_agent(st.conn, body.agent_id)
+                return db.get_agent(st.conn, chat.agent_id)
 
         try:
             agent = await asyncio.to_thread(get_agent_sync)
@@ -787,18 +794,18 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
 
         agent = await refresh_agent_wiki_cache_if_needed(st, agent)
 
-        if body.party_followup:
+        if chat.party_followup:
             msgs = _build_messages_party_reply(st, agent)
         else:
-            if not (body.user_message or "").strip():
+            if not (chat.user_message or "").strip():
                 raise HTTPException(400, "userMessage required unless partyFollowup")
-            msgs = _build_messages(st, agent, body.user_message.strip())
+            msgs = _build_messages(st, agent, chat.user_message.strip())
         reply = await chat_completion(base, agent.model, agent.temperature, msgs)
 
-        if body.party_followup:
+        if chat.party_followup:
             uline = "[Party follow-up]"
         else:
-            uline = body.user_message.strip()
+            uline = chat.user_message.strip()
 
         stm_ok = await should_persist_stm_exchange(base, agent, uline, reply)
 
@@ -806,13 +813,13 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
             with st.lock:
                 if not stm_ok:
                     return
-                if body.party_followup:
+                if chat.party_followup:
                     db.append_short_term(
                         st.conn, agent.id, "assistant", reply, agent.memory_short_term_limit
                     )
                 else:
                     db.append_short_term(
-                        st.conn, agent.id, "user", body.user_message.strip(), agent.memory_short_term_limit
+                        st.conn, agent.id, "user", chat.user_message.strip(), agent.memory_short_term_limit
                     )
                     db.append_short_term(
                         st.conn, agent.id, "assistant", reply, agent.memory_short_term_limit
@@ -825,12 +832,12 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         return {"reply": reply}
 
     @app.post("/api/ollama/chat/stream")
-    async def ollama_chat_stream_ep(body: ChatIn) -> StreamingResponse:
+    async def ollama_chat_stream_ep(chat: ChatIn) -> StreamingResponse:
         base = _get_ollama_base(st)
 
         def get_agent_sync():
             with st.lock:
-                return db.get_agent(st.conn, body.agent_id)
+                return db.get_agent(st.conn, chat.agent_id)
 
         try:
             agent = await asyncio.to_thread(get_agent_sync)
@@ -841,12 +848,12 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
 
         agent = await refresh_agent_wiki_cache_if_needed(st, agent)
 
-        if body.party_followup:
+        if chat.party_followup:
             msgs = _build_messages_party_reply(st, agent)
         else:
-            if not (body.user_message or "").strip():
+            if not (chat.user_message or "").strip():
                 raise HTTPException(400, "userMessage required unless partyFollowup")
-            msgs = _build_messages(st, agent, body.user_message.strip())
+            msgs = _build_messages(st, agent, chat.user_message.strip())
 
         async def gen():
             parts: list[str] = []
@@ -862,10 +869,10 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
 
             text = "".join(parts)
 
-            if body.party_followup:
+            if chat.party_followup:
                 uline = "[Party follow-up]"
             else:
-                uline = body.user_message.strip()
+                uline = chat.user_message.strip()
 
             stm_ok = await should_persist_stm_exchange(base, agent, uline, text)
 
@@ -873,13 +880,13 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
                 with st.lock:
                     if not stm_ok:
                         return
-                    if body.party_followup:
+                    if chat.party_followup:
                         db.append_short_term(
                             st.conn, agent.id, "assistant", text, agent.memory_short_term_limit
                         )
                     else:
                         db.append_short_term(
-                            st.conn, agent.id, "user", body.user_message.strip(), agent.memory_short_term_limit
+                            st.conn, agent.id, "user", chat.user_message.strip(), agent.memory_short_term_limit
                         )
                         db.append_short_term(
                             st.conn, agent.id, "assistant", text, agent.memory_short_term_limit
@@ -894,46 +901,46 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         return StreamingResponse(gen(), media_type="application/x-ndjson")
 
     @app.post("/api/memory/embed")
-    async def memory_embed_ep(body: MemoryEmbedIn) -> dict[str, bool]:
+    async def memory_embed_ep(req: MemoryEmbedIn) -> dict[str, bool]:
         base = _get_ollama_base(st)
 
         def get_agent_sync():
             with st.lock:
-                return db.get_agent(st.conn, body.agent_id)
+                return db.get_agent(st.conn, req.agent_id)
 
         try:
             agent = await asyncio.to_thread(get_agent_sync)
         except KeyError:
             raise HTTPException(404, "agent not found")
 
-        v = await embed_text(base, agent.embedding_model, body.text)
+        v = await embed_text(base, agent.embedding_model, req.text)
         emb = f32_vec_to_bytes(v)
 
         def ins():
             with st.lock:
-                db.insert_long_term(st.conn, body.agent_id, "fact", body.text, emb)
+                db.insert_long_term(st.conn, req.agent_id, "fact", req.text, emb)
 
         await asyncio.to_thread(ins)
         return {"ok": True}
 
     @app.post("/api/memory/search")
-    async def memory_search_ep(body: MemorySearchIn) -> list[str]:
+    async def memory_search_ep(req: MemorySearchIn) -> list[str]:
         base = _get_ollama_base(st)
 
         def get_agent_sync():
             with st.lock:
-                return db.get_agent(st.conn, body.agent_id)
+                return db.get_agent(st.conn, req.agent_id)
 
         try:
             agent = await asyncio.to_thread(get_agent_sync)
         except KeyError:
             raise HTTPException(404, "agent not found")
 
-        qv = await embed_text(base, agent.embedding_model, body.query)
+        qv = await embed_text(base, agent.embedding_model, req.query)
 
         def rows():
             with st.lock:
-                return db.list_long_term_for_agent(st.conn, body.agent_id)
+                return db.list_long_term_for_agent(st.conn, req.agent_id)
 
         ltm = await asyncio.to_thread(rows)
         scored: list[tuple[float, str]] = []
@@ -943,7 +950,7 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
                 if len(v) == len(qv):
                     scored.append((cosine_similarity(qv, v), text))
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [t for _, t in scored[: body.top_k]]
+        return [t for _, t in scored[: req.top_k]]
 
     @app.post("/api/ollama/launch")
     async def ollama_launch() -> dict[str, str]:
@@ -1063,7 +1070,7 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         return await asyncio.to_thread(_)
 
     @app.post("/api/voice/piper/synthesize")
-    async def voice_piper_synth(body: PiperSynthIn) -> dict[str, str]:
+    async def voice_piper_synth(req: PiperSynthIn) -> dict[str, str]:
         def paths():
             with st.lock:
                 user_piper = db.get_config(st.conn, "piper_path") or ""
@@ -1078,20 +1085,20 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
                 "Set piper_models_dir in Settings (folder with .onnx + .json), or keep it empty to use bundled voices.",
             )
 
-        model = Path(eff) / body.model_file
+        model = Path(eff) / req.model_file
 
         def run() -> bytes:
             if piper_tts_importable():
                 try:
-                    return synthesize_wav_piper_tts(model, body.text)
+                    return synthesize_wav_piper_tts(model, req.text)
                 except Exception as py_err:
                     try:
                         exe = resolve_sidecar_exe("piper", user_piper)
-                        return run_piper_to_wav(exe, model, body.text)
+                        return run_piper_to_wav(exe, model, req.text)
                     except Exception:
                         raise py_err from None
             exe = resolve_sidecar_exe("piper", user_piper)
-            return run_piper_to_wav(exe, model, body.text)
+            return run_piper_to_wav(exe, model, req.text)
 
         try:
             wav = await asyncio.to_thread(run)
@@ -1102,18 +1109,24 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         return {"bytesBase64": base64.b64encode(wav).decode("ascii")}
 
     @app.post("/api/voice/whisper/transcribe")
-    async def voice_whisper_tx(body: dict[str, Any]) -> dict[str, str]:
+    async def voice_whisper_tx(payload: dict[str, Any] = Body(...)) -> dict[str, str]:
         import base64
 
-        raw = body.get("audioBase64") or ""
+        raw = payload.get("audioBase64") or ""
         try:
             audio = base64.b64decode(raw)
         except Exception:
-            raise HTTPException(400, "invalid audioBase64")
+            raise HTTPException(400, "invalid audioBase64 (must be base64-encoded bytes)")
+        if len(audio) < 200:
+            raise HTTPException(
+                400,
+                "audio too small or empty after decode — hold the mic button longer or check the microphone permission.",
+            )
         if not is_wav_header(audio):
             raise HTTPException(
                 400,
-                "Whisper expects raw PCM WAV (RIFF/WAVE). Browser mic is usually WebM — use mock STT or convert.",
+                "Whisper expects 16-bit PCM WAV (RIFF/WAVE). If you did not use this app’s record button, "
+                "convert to WAV or use mock STT in Settings.",
             )
 
         def paths():
@@ -1127,14 +1140,15 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         if not eff_model:
             raise HTTPException(
                 400,
-                "Set whisper_model_path to a ggml / gguf file, or download ggml-small.bin into foundry_agent_studio/whisper_models/ (see README).",
+                "No Whisper model file: download ggml-small.bin into foundry_agent_studio/whisper_models/ "
+                "(see README) or set Whisper model file in Local voice to a .ggml/.gguf path.",
             )
 
         def run():
             exe = resolve_whisper_cli_exe(user_w)
             model = Path(eff_model)
             wav = write_temp_wav(audio)
-            txt_path = wav.with_suffix(".txt")
+            txt_path = Path(str(wav) + ".txt")
             try:
                 text = run_whisper_cli_to_text(exe, model, wav)
             finally:

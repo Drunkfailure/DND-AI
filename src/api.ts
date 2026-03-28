@@ -3,6 +3,26 @@ export function apiBase(): string {
   return import.meta.env.VITE_API_BASE ?? "";
 }
 
+/** Turn FastAPI error JSON into a short user-facing string. */
+export function formatApiErrorBody(text: string, status: number): string {
+  const raw = (text || "").trim();
+  if (!raw) return `HTTP ${status}`;
+  try {
+    const j = JSON.parse(raw) as { detail?: unknown };
+    const d = j.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d)) {
+      const parts = d.map((x: { msg?: string }) =>
+        typeof x?.msg === "string" ? x.msg : JSON.stringify(x),
+      );
+      return parts.join("; ") || raw;
+    }
+  } catch {
+    /* not JSON */
+  }
+  return raw;
+}
+
 export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${apiBase()}${path}`, {
     ...init,
@@ -13,7 +33,7 @@ export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!r.ok) {
     const t = await r.text();
-    throw new Error(t || `${r.status}`);
+    throw new Error(formatApiErrorBody(t, r.status));
   }
   return r.json() as Promise<T>;
 }
@@ -30,7 +50,7 @@ export async function apiNdjsonStream(
   });
   if (!r.ok) {
     const t = await r.text();
-    throw new Error(t || `${r.status}`);
+    throw new Error(formatApiErrorBody(t, r.status));
   }
   const reader = r.body?.getReader();
   if (!reader) throw new Error("no response body");

@@ -137,10 +137,13 @@ def run_whisper_cli_to_text(whisper_exe: Path, model: Path, wav: Path) -> str:
         capture_output=True,
         text=True,
         timeout=600,
+        cwd=str(whisper_exe.resolve().parent),
     )
     if proc.returncode != 0:
-        raise RuntimeError(proc.stderr or proc.stdout or "whisper failed")
-    txt_path = wav.with_suffix(".txt")
+        err = (proc.stderr or "").strip() or (proc.stdout or "").strip() or "whisper failed"
+        raise RuntimeError(f"whisper-cli exited {proc.returncode}: {err}")
+    # whisper.cpp writes "file.wav.txt", not "file.txt" (Path.with_suffix would replace .wav).
+    txt_path = Path(str(wav) + ".txt")
     if txt_path.is_file():
         return txt_path.read_text(encoding="utf-8", errors="replace")
     raise FileNotFoundError(f"Expected transcript at {txt_path}")
