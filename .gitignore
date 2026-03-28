@@ -1,0 +1,12 @@
+node_modules/
+dist/
+web/dist/
+*.db
+.DS_Store
+.env
+.env.*
+/Storage
+
+# Whisper weights (~466 MiB+); GitHub rejects blobs >100 MB — download locally (see whisper_models/README.txt)
+foundry_agent_studio/whisper_models/*.bin
+foundry_agent_studio/whisper_models/*.gguf

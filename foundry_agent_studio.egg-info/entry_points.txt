@@ -1,0 +1,2 @@
+[console_scripts]
+fas = foundry_agent_studio.__main__:main
