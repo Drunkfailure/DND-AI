@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import Body, FastAPI, Header, HTTPException, Request
+from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,14 +35,30 @@ from foundry_agent_studio.ollama_client import (
     list_models,
     pull_model,
 )
-from foundry_agent_studio.bridge_rolls import format_sheet_snapshot_for_prompt, parse_fas_directives
+from foundry_agent_studio.bridge_rolls import (
+    clamp_move_actions_to_walk_budget,
+    clamp_turn_action_economy,
+    format_sheet_snapshot_for_prompt,
+    format_weapon_attack_allowlist,
+    parse_fas_directives,
+    sanitize_fas_actions_against_sheet,
+)
 from foundry_agent_studio.combat_context import (
+    ensure_explicit_targets_on_attack_spell_actions,
     filter_mechanical_actions,
+    format_battlefield_snapshot_for_prompt,
     format_combat_snapshot_for_prompt,
+    format_movement_budget_for_prompt,
     get_combat_blob_from_conn,
     is_active_combat_snapshot,
 )
-from foundry_agent_studio.constants import BANTER_MODE_SUFFIX, FOUNDRY_ROLL_SYNTAX_HINT
+from foundry_agent_studio.constants import (
+    BANTER_MODE_SUFFIX,
+    COMBAT_AUTOMATION_ONLY_OVERRIDE,
+    COMBAT_TURN_USER_PROMPT,
+    FOUNDRY_ROLL_SYNTAX_HINT,
+    MOVE_AND_RANGE_DISCIPLINE_HINT,
+)
 from foundry_agent_studio.memory_gates import should_persist_stm_exchange, should_run_ltm_semantic
 from foundry_agent_studio.paths import (
     bootstrap_paths_file,
@@ -66,6 +84,25 @@ from foundry_agent_studio.voice_binaries import (
     run_whisper_cli_to_text,
     write_temp_wav,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _bridge_event_debounced(st: AppState, key: str, interval_s: float) -> bool:
+    """Return True if this event should be skipped (same key fired again too soon)."""
+    now = time.monotonic()
+    with st.lock:
+        last = st.bridge_event_debounce.get(key)
+        if last is not None and (now - last) < interval_s:
+            logger.info(
+                "Bridge debounced %s (%.2fs since last, need %.2fs)",
+                key,
+                now - last,
+                interval_s,
+            )
+            return True
+        st.bridge_event_debounce[key] = now
+    return False
 
 
 def _get_ollama_base(state: AppState) -> str:
@@ -156,8 +193,15 @@ def _append_world_wiki_parts(parts: list[str], agent: Agent) -> None:
 def _append_foundry_sheet_and_roll_hint(parts: list[str], agent: Agent) -> None:
     if (agent.foundry_actor_id or "").strip():
         parts.append(FOUNDRY_ROLL_SYNTAX_HINT.strip())
+        parts.append(MOVE_AND_RANGE_DISCIPLINE_HINT.strip())
     snap = (agent.foundry_sheet_snapshot or "").strip()
     if snap:
+        mb = format_movement_budget_for_prompt(snap)
+        if mb:
+            parts.append(mb)
+        allow = format_weapon_attack_allowlist(snap)
+        if allow:
+            parts.append(allow)
         formatted = format_sheet_snapshot_for_prompt(snap)
         if formatted:
             parts.append(
@@ -166,18 +210,31 @@ def _append_foundry_sheet_and_roll_hint(parts: list[str], agent: Agent) -> None:
             )
 
 
+def _append_combat_automation_override(parts: list[str], state: AppState, agent: Agent) -> None:
+    """When combat is active, override 'describe intentions' with directives-only discipline. Caller must hold state.lock."""
+    if not (agent.foundry_actor_id or "").strip():
+        return
+    blob = get_combat_blob_from_conn(state.conn)
+    if is_active_combat_snapshot(blob):
+        parts.append(COMBAT_AUTOMATION_ONLY_OVERRIDE.strip())
+
+
 def _append_combat_context(parts: list[str], state: AppState, agent: Agent) -> None:
     if not (agent.foundry_actor_id or "").strip():
         return
     block = format_combat_snapshot_for_prompt(state.conn, agent)
     if block:
         parts.append(block)
+    bf = format_battlefield_snapshot_for_prompt(state.conn, agent)
+    if bf:
+        parts.append(bf)
 
 
 def _build_messages(state: AppState, agent: Agent, latest: str) -> list[tuple[str, str]]:
     with state.lock:
         system = agent.full_system_prompt()
         parts = [system]
+        _append_combat_automation_override(parts, state, agent)
         if (agent.memory_stm_guidance or "").strip():
             parts.append(
                 "Guidance for recent dialogue (short-term context):\n" + agent.memory_stm_guidance.strip()
@@ -210,6 +267,7 @@ def _build_messages_party_reply(state: AppState, agent: Agent) -> list[tuple[str
     with state.lock:
         system = agent.full_system_prompt()
         parts = [system]
+        _append_combat_automation_override(parts, state, agent)
         if (agent.memory_stm_guidance or "").strip():
             parts.append(
                 "Guidance for recent dialogue (short-term context):\n" + agent.memory_stm_guidance.strip()
@@ -1170,9 +1228,83 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         hdr = (x_fas_secret or "").strip()
         return bool(sec) and hdr == sec
 
+    async def _bridge_agent_chat_reply(agent: Agent, user_content: str) -> JSONResponse:
+        agent = await refresh_agent_wiki_cache_if_needed(st, agent)
+        ollama_base = _get_ollama_base(st)
+        msgs = _build_messages(st, agent, user_content)
+        try:
+            reply = await chat_completion(ollama_base, agent.model, agent.temperature, msgs)
+        except Exception as e:
+            return JSONResponse({"detail": str(e)}, status_code=502)
+
+        clean_reply, fas_actions = parse_fas_directives(reply)
+        snap = (agent.foundry_sheet_snapshot or "").strip()
+        if snap:
+            fas_actions = sanitize_fas_actions_against_sheet(fas_actions, snap)
+            fas_actions = clamp_move_actions_to_walk_budget(fas_actions, snap)
+        with st.lock:
+            combat_blob = get_combat_blob_from_conn(st.conn)
+        # Always clamp mechanical actions — if combat snapshot is missing/stale, is_active_combat was false and
+        # the model could spam many [[fas-attack]] lines in one reply.
+        fas_actions = clamp_turn_action_economy(fas_actions)
+        fas_actions = ensure_explicit_targets_on_attack_spell_actions(agent, fas_actions, combat_blob)
+        fas_actions = filter_mechanical_actions(agent, fas_actions, combat_blob)
+        stm_ok = await should_persist_stm_exchange(ollama_base, agent, user_content, clean_reply)
+
+        def persist_stm():
+            with st.lock:
+                if not stm_ok:
+                    return
+                db.append_short_term(st.conn, agent.id, "user", user_content, agent.memory_short_term_limit)
+                db.append_short_term(
+                    st.conn, agent.id, "assistant", clean_reply, agent.memory_short_term_limit
+                )
+
+        await asyncio.to_thread(persist_stm)
+
+        await _apply_ltm_after_exchange(st, agent, ollama_base, user_content, clean_reply)
+        out: dict[str, Any] = {
+            "id": str(uuid.uuid4()),
+            "userId": agent.foundry_user_id,
+            "actorId": agent.foundry_actor_id if agent.foundry_actor_id else None,
+            "content": format_chat_html(clean_reply),
+        }
+        if fas_actions:
+            out["actions"] = fas_actions
+            out["rolls"] = [a for a in fas_actions if a.get("type") == "roll"]
+
+        logger.info(
+            "bridge outbox: agent=%s name=%r actorId=%s actions=%s",
+            agent.id,
+            agent.name,
+            agent.foundry_actor_id,
+            json.dumps(fas_actions, ensure_ascii=False) if fas_actions else "[]",
+        )
+
+        with st.lock:
+            st.outbox.append(out)
+
+        return JSONResponse({"ok": True, "handled": True, "agentId": agent.id})
+
     @app.get("/api/bridge/health")
     async def bridge_health() -> dict[str, Any]:
         return {"ok": True, "service": "foundry-agent-studio-bridge"}
+
+    @app.get("/api/bridge/player-actor-ids")
+    async def bridge_player_actor_ids(
+        worldId: str = Query("", alias="worldId"),
+        x_fas_secret: Optional[str] = Header(None, alias="X-FAS-Secret"),
+    ) -> JSONResponse:
+        """Actor ids linked to enabled player agents — Foundry module uses this to auto-roll initiative."""
+        if not _verify_secret(x_fas_secret):
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+
+        def load() -> list[str]:
+            with st.lock:
+                return db.list_linked_player_actor_ids(st.conn, worldId)
+
+        actor_ids = await asyncio.to_thread(load)
+        return JSONResponse({"actorIds": actor_ids})
 
     @app.get("/api/bridge/outbox")
     async def bridge_outbox() -> dict[str, Any]:
@@ -1223,12 +1355,14 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         if event_type == "combat.state":
             world_cs = str(payload.get("worldId") or "")
             combat_data = payload.get("combat")
+            battlefield_data = payload.get("battlefield")
 
             def save_combat() -> None:
                 with st.lock:
                     blob = {
                         "worldId": world_cs,
                         "combat": combat_data,
+                        "battlefield": battlefield_data,
                         "updatedAt": utc_now_rfc3339(),
                     }
                     raw = json.dumps(blob, ensure_ascii=False)
@@ -1239,64 +1373,41 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
             await asyncio.to_thread(save_combat)
             return JSONResponse({"ok": True})
 
-        if event_type != "chat.received":
-            return JSONResponse({"ok": True, "ignored": event_type})
+        if event_type == "combat.turn":
+            turn_actor = str(payload.get("actorId") or "")
+            if not turn_actor:
+                return JSONResponse({"ok": True, "handled": False})
 
-        user_id = str(payload.get("userId") or "")
-        actor_id = str(payload.get("actorId") or "")
-        world_id = str(payload.get("worldId") or "")
-        content = str(payload.get("content") or "")
+            def find_pc():
+                with st.lock:
+                    return db.find_enabled_player_agent_by_actor_id(st.conn, turn_actor)
 
-        def find_agent():
-            with st.lock:
-                return db.find_responder_agent(st.conn, user_id, actor_id, world_id)
+            pc_agent = await asyncio.to_thread(find_pc)
+            if pc_agent is None:
+                return JSONResponse({"ok": True, "handled": False})
+            # Foundry may fire combatTurn + updateCombat close together — two LLM runs → two attack batches.
+            if _bridge_event_debounced(st, f"turn:{turn_actor}", 2.5):
+                return JSONResponse({"ok": True, "handled": False, "reason": "debounced"})
+            return await _bridge_agent_chat_reply(pc_agent, COMBAT_TURN_USER_PROMPT)
 
-        agent = await asyncio.to_thread(find_agent)
-        if agent is None:
-            return JSONResponse({"ok": True, "handled": False})
+        if event_type == "chat.received":
+            user_id = str(payload.get("userId") or "")
+            actor_id = str(payload.get("actorId") or "")
+            world_id = str(payload.get("worldId") or "")
+            content = str(payload.get("content") or "")
 
-        agent = await refresh_agent_wiki_cache_if_needed(st, agent)
+            def find_agent():
+                with st.lock:
+                    return db.find_responder_agent(st.conn, user_id, actor_id, world_id)
 
-        ollama_base = _get_ollama_base(st)
-        msgs = _build_messages(st, agent, content)
+            agent = await asyncio.to_thread(find_agent)
+            if agent is None:
+                return JSONResponse({"ok": True, "handled": False})
+            if actor_id and _bridge_event_debounced(st, f"chat:{world_id}:{actor_id}", 1.2):
+                return JSONResponse({"ok": True, "handled": False, "reason": "debounced"})
+            return await _bridge_agent_chat_reply(agent, content)
 
-        try:
-            reply = await chat_completion(ollama_base, agent.model, agent.temperature, msgs)
-        except Exception as e:
-            return JSONResponse({"detail": str(e)}, status_code=502)
-
-        clean_reply, fas_actions = parse_fas_directives(reply)
-        with st.lock:
-            combat_blob = get_combat_blob_from_conn(st.conn)
-        fas_actions = filter_mechanical_actions(agent, fas_actions, combat_blob)
-        stm_ok = await should_persist_stm_exchange(ollama_base, agent, content, clean_reply)
-
-        def persist_stm():
-            with st.lock:
-                if not stm_ok:
-                    return
-                db.append_short_term(st.conn, agent.id, "user", content, agent.memory_short_term_limit)
-                db.append_short_term(
-                    st.conn, agent.id, "assistant", clean_reply, agent.memory_short_term_limit
-                )
-
-        await asyncio.to_thread(persist_stm)
-
-        await _apply_ltm_after_exchange(st, agent, ollama_base, content, clean_reply)
-        out: dict[str, Any] = {
-            "id": str(uuid.uuid4()),
-            "userId": agent.foundry_user_id,
-            "actorId": agent.foundry_actor_id if agent.foundry_actor_id else None,
-            "content": format_chat_html(clean_reply),
-        }
-        if fas_actions:
-            out["actions"] = fas_actions
-            out["rolls"] = [a for a in fas_actions if a.get("type") == "roll"]
-
-        with st.lock:
-            st.outbox.append(out)
-
-        return JSONResponse({"ok": True, "handled": True, "agentId": agent.id})
+        return JSONResponse({"ok": True, "ignored": event_type})
 
     # ——— Static UI ———
     root = Path(__file__).resolve().parent.parent

@@ -108,6 +108,18 @@ function mergeOllamaOptions(installed: string[], suggested: string[]): string[] 
   return out;
 }
 
+/** Voices actually present: one datalist entry per `.onnx` in the effective Piper models folder. */
+function voiceOptionsFromOnnxFiles(onnxFiles: OnnxFile[]): PiperCatalogEntry[] {
+  const out: PiperCatalogEntry[] = [];
+  for (const f of onnxFiles) {
+    const name = (f.name || "").trim();
+    if (!name.toLowerCase().endsWith(".onnx")) continue;
+    const id = name.replace(/\.onnx$/i, "");
+    out.push({ id, onnxFile: name });
+  }
+  return out.sort((a, b) => a.onnxFile.localeCompare(b.onnxFile));
+}
+
 const DEFAULT_AGENT_PIPER_ONNX = "en_US-lessac-medium.onnx";
 
 function agentPiperOnnxFile(agent: Agent | null, testFallback: string): string {
@@ -149,7 +161,6 @@ export default function App() {
   const [whisperModelPath, setWhisperModelPath] = useState("");
   const [voiceStatus, setVoiceStatus] = useState<VoiceLocalPaths | null>(null);
   const [onnxList, setOnnxList] = useState<OnnxFile[]>([]);
-  const [piperCatalog, setPiperCatalog] = useState<PiperCatalogEntry[]>([]);
   const [piperTestModel, setPiperTestModel] = useState("en_US-lessac-medium.onnx");
   /** Private = only this agent's memory; Party = line stored for every enabled agent, then this agent speaks. */
   const [chatScope, setChatScope] = useState<"private" | "party">("private");
@@ -187,6 +198,8 @@ export default function App() {
     [ollamaModels],
   );
 
+  const agentPiperVoiceOptions = useMemo(() => voiceOptionsFromOnnxFiles(onnxList), [onnxList]);
+
   const refresh = useCallback(async () => {
     setErr(null);
     try {
@@ -207,12 +220,6 @@ export default function App() {
         setOnnxList(ox);
       } catch {
         setOnnxList([]);
-      }
-      try {
-        const cat = await apiJson<PiperCatalogEntry[]>("/api/voice/piper/catalog");
-        setPiperCatalog(cat);
-      } catch {
-        setPiperCatalog([]);
       }
       try {
         const ok = await apiJson<boolean>("/api/ollama/health");
@@ -887,10 +894,18 @@ export default function App() {
           Test Piper — model filename
           <input
             className="input"
+            list="fas-piper-voices-merged"
+            autoComplete="off"
             value={piperTestModel}
             onChange={(e) => setPiperTestModel(e.target.value)}
+            placeholder="en_US-lessac-medium.onnx"
           />
         </label>
+        <datalist id="fas-piper-voices-merged">
+          {agentPiperVoiceOptions.map((o) => (
+            <option key={o.onnxFile} value={o.onnxFile} label={o.id} />
+          ))}
+        </datalist>
         <div className="row">
           <button type="button" onClick={() => void testPiperLocal()}>
             Test Piper (synthesize)
@@ -1184,7 +1199,7 @@ export default function App() {
                 Piper voice (<code>.onnx</code> filename in your Piper models folder)
                 <input
                   className="input"
-                  list={`piper-catalog-${selected.id}`}
+                  list="fas-piper-voices-merged"
                   placeholder={DEFAULT_AGENT_PIPER_ONNX}
                   autoComplete="off"
                   value={selected.voiceModel ?? ""}
@@ -1196,15 +1211,9 @@ export default function App() {
                     })
                   }
                 />
-                <datalist id={`piper-catalog-${selected.id}`}>
-                  {piperCatalog.map((o) => (
-                    <option key={o.id} value={o.onnxFile} label={o.id} />
-                  ))}
-                </datalist>
                 <p className="small muted" style={{ marginTop: "0.35rem" }}>
-                  Pick from the list (same names as <code>python -m piper.download_voices</code>) or type a custom file
-                  name. Download e.g.{" "}
-                  <code>python -m piper.download_voices en_US-lessac-medium</code>.
+                  Suggestions list only <code>.onnx</code> files found in your effective Piper models folder (Save
+                  voice paths &amp; Refresh). You can still type another filename manually.
                 </p>
               </label>
               <label>

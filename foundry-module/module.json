@@ -2,12 +2,21 @@
   "id": "foundry-agent-studio",
   "title": "Foundry Agent Studio Bridge",
   "description": "HTTP bridge between Foundry chat and the Foundry Agent Studio desktop app (player agents only).",
-  "version": "0.1.0",
+  "version": "0.1.27",
   "compatibility": {
     "minimum": "11",
     "verified": "13"
   },
   "esmodules": ["scripts/bridge.js"],
   "styles": [],
-  "languages": []
+  "languages": [],
+  "relationships": {
+    "recommends": [
+      {
+        "id": "midi-qol",
+        "type": "module",
+        "reason": "Optional: full attack/damage/save workflows via MidiQOL.completeItemUse when bridge rolls attacks or spells."
+      }
+    ]
+  }
 }

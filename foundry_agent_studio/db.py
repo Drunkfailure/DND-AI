@@ -583,6 +583,35 @@ def find_agent_by_foundry_actor(
     return None
 
 
+def find_enabled_player_agent_by_actor_id(conn: sqlite3.Connection, actor_id: str) -> Optional[Agent]:
+    """Single enabled player agent linked to this Foundry actor id (e.g. combat turn automation)."""
+    if not actor_id:
+        return None
+    for a in list_agents(conn):
+        if not a.is_enabled or a.role != "player":
+            continue
+        if a.foundry_actor_id != actor_id:
+            continue
+        return a
+    return None
+
+
+def list_linked_player_actor_ids(conn: sqlite3.Connection, _world_id: str = "") -> list[str]:
+    """Foundry actor ids for enabled player agents (used by the module to auto-roll initiative).
+
+    World id is ignored: a mismatched Foundry World ID in the app would otherwise drop
+    every linked actor (common when the world slug/id changes). Combatants still match by actor id.
+    """
+    out: list[str] = []
+    for a in list_agents(conn):
+        if not a.is_enabled or a.role != "player":
+            continue
+        if not a.foundry_actor_id:
+            continue
+        out.append(a.foundry_actor_id)
+    return out
+
+
 def set_foundry_sheet_snapshot(conn: sqlite3.Connection, agent_id: str, snapshot_json: str) -> None:
     conn.execute(
         "UPDATE agents SET foundry_sheet_snapshot = ?, updated_at = ? WHERE id = ?",
