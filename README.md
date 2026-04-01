@@ -4,16 +4,6 @@ Production-minded **MVP**: a **Python** desktop-style app that runs **locally**,
 
 The UI is **React + Vite** (`src/`), built to `web/dist/` and served by the same process as the API (default port **17890**).
 
-## Design rule (non-negotiable)
-
-- **You (the human) are always the Game Master.**
-- **All AI agents are player characters / party members only.**
-- Agents **never** decide outcomes, control the world, narrate facts as GM, or operate NPCs that are not their own PC framing (they only roleplay **their** character).
-
-Every agent system prompt is prefixed in Python with:
-
-> You are a player character in a tabletop RPG. You are NOT the Game Master. You do not control outcomes or the world. You only describe your character's thoughts, dialogue, and intended actions. The GM determines outcomes.
-
 ## Architecture (summary)
 
 | Layer | Role |
